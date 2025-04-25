@@ -6,14 +6,17 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.personalfinancetracker.databinding.ActivityTransactionBinding
 import com.google.android.material.tabs.TabLayout
+import kotlinx.coroutines.launch
 
 class TransactionActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTransactionBinding
     private lateinit var preferencesManager: PreferencesManager
+    private lateinit var repository: FinanceRepository
     private lateinit var allTransactions: MutableList<Transaction>
     private lateinit var filteredTransactions: MutableList<Transaction>
     private lateinit var adapter: TransactionAdapter
@@ -34,13 +37,26 @@ class TransactionActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "All Transactions"
 
+        // Initialize Room database and repository
+        val database = AppDatabase.getDatabase(this)
+        repository = FinanceRepository(database)
+        preferencesManager = PreferencesManager(this)
+
         initializeComponents()
         setupTabLayout()
         setupRecyclerView()
         setupClickListeners()
         setupSearchListener()
+        observeTransactions()
+    }
 
-        //filterTransactions(TransactionType.ALL)
+    private fun observeTransactions() {
+        lifecycleScope.launch {
+            repository.allTransactions.collect { transactions ->
+                allTransactions = transactions.toMutableList()
+                filterTransactions(currentType)
+            }
+        }
     }
 
     private fun setupSearchListener() {
@@ -55,11 +71,8 @@ class TransactionActivity : AppCompatActivity() {
     }
 
     private fun initializeComponents() {
-        preferencesManager = PreferencesManager(this)
-        allTransactions = preferencesManager.getTransactions().toMutableList()
-        // Sort transactions by date (newest first)
-        allTransactions.sortByDescending { it.date }
-        filteredTransactions = allTransactions.toMutableList()
+        allTransactions = mutableListOf()
+        filteredTransactions = mutableListOf()
     }
 
     private fun setupTabLayout() {
@@ -143,19 +156,9 @@ class TransactionActivity : AppCompatActivity() {
 
     private fun showAddTransactionDialog() {
         AddTransactionDialog(this) { transaction ->
-            // Add the new transaction to the main list
-            allTransactions.add(0, transaction)
-            preferencesManager.saveTransactions(allTransactions)
-
-            // If the current filter includes this type of transaction, add it to filtered list
-            if (shouldIncludeTransaction(transaction)) {
-                filteredTransactions.add(0, transaction)
-                adapter.notifyItemInserted(0)
-                binding.rvTransactions.scrollToPosition(0)
+            lifecycleScope.launch {
+                repository.insertTransaction(transaction)
             }
-
-            // Update empty state visibility
-            updateEmptyState()
         }.show()
     }
 
@@ -164,51 +167,14 @@ class TransactionActivity : AppCompatActivity() {
             this,
             transaction,
             onUpdate = { updatedTransaction ->
-                // Find and update in the main list
-                val mainIndex = allTransactions.indexOfFirst { it.id == updatedTransaction.id }
-                if (mainIndex != -1) {
-                    allTransactions[mainIndex] = updatedTransaction
-                    preferencesManager.saveTransactions(allTransactions)
+                lifecycleScope.launch {
+                    repository.updateTransaction(updatedTransaction)
                 }
-
-                // Find and update in the filtered list if present
-                val filteredIndex = filteredTransactions.indexOfFirst { it.id == updatedTransaction.id }
-                if (filteredIndex != -1) {
-                    // Check if the updated transaction still belongs in the current filter
-                    if (shouldIncludeTransaction(updatedTransaction)) {
-                        filteredTransactions[filteredIndex] = updatedTransaction
-                        adapter.notifyItemChanged(filteredIndex)
-                    } else {
-                        // Remove if it no longer belongs in this filter
-                        filteredTransactions.removeAt(filteredIndex)
-                        adapter.notifyItemRemoved(filteredIndex)
-                    }
-                } else if (shouldIncludeTransaction(updatedTransaction)) {
-                    // If it wasn't in the filtered list but now should be, add it
-                    filteredTransactions.add(0, updatedTransaction)
-                    adapter.notifyItemInserted(0)
-                }
-
-                // Update empty state visibility
-                updateEmptyState()
             },
             onDelete = {
-                // Find and remove from the main list
-                val mainIndex = allTransactions.indexOfFirst { it.id == transaction.id }
-                if (mainIndex != -1) {
-                    allTransactions.removeAt(mainIndex)
-                    preferencesManager.saveTransactions(allTransactions)
+                lifecycleScope.launch {
+                    repository.deleteTransaction(transaction)
                 }
-
-                // Find and remove from the filtered list if present
-                val filteredIndex = filteredTransactions.indexOfFirst { it.id == transaction.id }
-                if (filteredIndex != -1) {
-                    filteredTransactions.removeAt(filteredIndex)
-                    adapter.notifyItemRemoved(filteredIndex)
-                }
-
-                // Update empty state visibility
-                updateEmptyState()
             }
         ).show()
     }
@@ -234,11 +200,5 @@ class TransactionActivity : AppCompatActivity() {
     override fun onSupportNavigateUp(): Boolean {
         onBackPressed()
         return true
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // Save transactions when activity is paused
-        preferencesManager.saveTransactions(allTransactions)
     }
 }

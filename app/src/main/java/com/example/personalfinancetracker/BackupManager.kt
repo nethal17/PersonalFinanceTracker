@@ -36,14 +36,16 @@ class BackupManager(private val context: Context) {
             }
 
             // Create backup data object
-            val backupData = BackupData(
-                transactions = transactions,
-                categories = categories,
-                currency = currency,
-                currentUser = currentUser,
-                users = users,
-                budgets = budgets
-            )
+            val backupData = currency?.let {
+                BackupData(
+                    transactions = transactions,
+                    categories = categories,
+                    currency = it,
+                    currentUser = currentUser,
+                    users = users,
+                    budgets = budgets
+                )
+            }
 
             // Convert to JSON
             val jsonData = gson.toJson(backupData)
