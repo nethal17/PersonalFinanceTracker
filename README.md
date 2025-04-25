@@ -1,0 +1,1 @@
+"FinWise" is a personal finance tracker application where you can track your incomes and expenses. You can add/delete/update your incomes and expenses whenever you want, also you can set a budget limit and got the notifications when budget limit got exceded.
