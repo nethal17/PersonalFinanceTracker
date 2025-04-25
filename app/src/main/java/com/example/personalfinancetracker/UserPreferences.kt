@@ -11,6 +11,10 @@ class UserPreferences(context: Context) {
     )
     private val gson = Gson()
 
+    fun getSharedPreferences(): SharedPreferences {
+        return sharedPreferences
+    }
+
     fun saveUser(user: User) {
         // Get existing users
         val users = getUsers().toMutableList()
