@@ -12,6 +12,10 @@ class PreferencesManager(context: Context) {
     private val sharedPreferences = context.getSharedPreferences("finance_tracker_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
+    fun getSharedPreferences(): SharedPreferences {
+        return sharedPreferences
+    }
+
     // Currency preference
     fun setCurrency(currency: String) {
         sharedPreferences.edit().putString("currency", currency).apply()
@@ -138,9 +142,5 @@ class PreferencesManager(context: Context) {
         val editor = sharedPreferences.edit()
         budgetKeys.forEach { editor.remove(it) }
         editor.apply()
-    }
-
-    fun getSharedPreferences(): SharedPreferences {
-        return sharedPreferences
     }
 }
