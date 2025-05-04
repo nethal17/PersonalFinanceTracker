@@ -18,6 +18,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import android.view.animation.DecelerateInterpolator
+import kotlinx.coroutines.flow.firstOrNull
 
 class MainActivity : AppCompatActivity() {
 
@@ -213,12 +214,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSetBudgetDialog() {
-        SetBudgetDialog(this) { budget ->
-            lifecycleScope.launch {
-                repository.insertBudget(budget)
-                updateDashboard()
-            }
-        }.show()
+        lifecycleScope.launch {
+            // Get current month and year
+            val (currentMonth, currentYear) = getCurrentMonthAndYear()
+            
+            // Check if budget exists for current month
+            val existingBudget = repository.getBudget(currentMonth, currentYear).firstOrNull()
+            
+            // Show dialog with existing budget amount if available
+            SetBudgetDialog(
+                this@MainActivity,
+                existingBudget?.amount,
+                onBudgetSet = { newBudget ->
+                    lifecycleScope.launch {
+                        if (existingBudget != null) {
+                            // Update existing budget
+                            val updatedBudget = existingBudget.copy(amount = newBudget.amount)
+                            repository.updateBudget(updatedBudget)
+                        } else {
+                            // Insert new budget
+                            repository.insertBudget(newBudget)
+                        }
+                        updateDashboard()
+                    }
+                }
+            ).show()
+        }
     }
 
     private fun formatAmount(currency: String, amount: Double): String {

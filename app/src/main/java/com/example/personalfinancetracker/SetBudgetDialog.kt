@@ -12,6 +12,7 @@ import java.util.Locale
 
 class SetBudgetDialog(
     context: Context,
+    private val initialAmount: Double? = null,
     private val onBudgetSet: (Budget) -> Unit
 ) : Dialog(context) {
 
@@ -36,10 +37,9 @@ class SetBudgetDialog(
         val currentMonth = calendar.get(Calendar.MONTH)
         val currentYear = calendar.get(Calendar.YEAR)
 
-        // Get current budget if exists
-        val currentBudget = preferencesManager.getBudget(currentMonth, currentYear)
-        if (currentBudget != null) {
-            binding.etBudgetAmount.setText(currentBudget.amount.toString())
+        // Set initial amount if provided
+        if (initialAmount != null) {
+            binding.etBudgetAmount.setText(initialAmount.toString())
         }
 
         // Set month and year text

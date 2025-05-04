@@ -1,12 +1,13 @@
+
 package com.example.personalfinancetracker
 
 import android.content.Context
-import android.os.Environment
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -16,118 +17,146 @@ class BackupManager(private val context: Context) {
     private val preferencesManager = PreferencesManager(context)
     private val userPreferences = UserPreferences(context)
     private val gson = Gson()
+    private val database = AppDatabase.getDatabase(context)
+    private val repository = FinanceRepository(database)
 
-    // Export data to internal storage
-    fun exportData(): Boolean {
-        try {
-            // Get all data to backup
-            val transactions = preferencesManager.getTransactions()
-            val categories = preferencesManager.getCategories()
+    suspend fun exportData(): Boolean {
+        return try {
+            Log.d("BackupManager", "Starting backup process...")
+
+            // Collect all data first
+            val transactions = repository.allTransactions.first()
+            val categories = repository.allCategories.first()
+            val budgets = repository.allBudgets.first()
+            val users = userPreferences.getUsers()
             val currency = preferencesManager.getCurrency()
             val currentUser = userPreferences.getCurrentUsername()
-            val users = userPreferences.getUsers()
 
-            // Get all budgets
-            val allKeys = preferencesManager.getSharedPreferences().all.keys
-            val budgetKeys = allKeys.filter { it.startsWith("budget_") }
-            val budgets = budgetKeys.associate { key ->
-                val budgetJson = preferencesManager.getSharedPreferences().getString(key, null)
-                key to gson.fromJson(budgetJson, Budget::class.java)
-            }
+            Log.d("BackupManager", "Collected data: " +
+                    "${transactions.size} transactions, " +
+                    "${categories.size} categories, " +
+                    "${budgets.size} budgets, " +
+                    "${users.size} users")
 
             // Create backup data object
-            val backupData = currency?.let {
-                BackupData(
-                    transactions = transactions,
-                    categories = categories,
-                    currency = it,
-                    currentUser = currentUser,
-                    users = users,
-                    budgets = budgets
-                )
-            }
+            val backupData = BackupData(
+                transactions = transactions,
+                categories = categories,
+                currency = currency,
+                currentUser = currentUser,
+                users = users,
+                budgets = budgets
+            )
 
             // Convert to JSON
             val jsonData = gson.toJson(backupData)
+            Log.d("BackupManager", "Converted data to JSON")
 
-            // Create backup directory if it doesn't exist
-            val backupDir = File(context.getExternalFilesDir(null), "backups")
-            if (!backupDir.exists()) {
-                backupDir.mkdirs()
+            // Create backup directory
+            val backupDir = File(context.getExternalFilesDir(null), "backups").apply {
+                if (!exists()) {
+                    Log.d("BackupManager", "Creating backup directory")
+                    mkdirs()
+                }
             }
 
             // Create backup file with timestamp
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "finance_tracker_backup_$timestamp.json"
             val backupFile = File(backupDir, fileName)
+            Log.d("BackupManager", "Creating backup file at: ${backupFile.absolutePath}")
 
             // Write to file
             FileOutputStream(backupFile).use { outputStream ->
                 outputStream.write(jsonData.toByteArray())
             }
 
-            return true
+            Log.d("BackupManager", "Backup completed successfully")
+            true
         } catch (e: Exception) {
-            e.printStackTrace()
-            return false
+            Log.e("BackupManager", "Backup failed", e)
+            false
         }
     }
 
-    // Import data from internal storage
-    fun importData(fileName: String): Boolean {
-        try {
-            val backupFile = File(context.getExternalFilesDir(null), "backups/$fileName")
+    suspend fun importData(fileName: String): Boolean {
+        return try {
+            Log.d("BackupManager", "Starting restore process for file: $fileName")
+
+            val backupDir = File(context.getExternalFilesDir(null), "backups")
+            val backupFile = File(backupDir, fileName)
+
             if (!backupFile.exists()) {
+                Log.e("BackupManager", "Backup file not found: ${backupFile.absolutePath}")
                 return false
             }
 
-            // Read file
+            // Read and parse file
             val jsonData = backupFile.readText()
-
-            // Parse JSON
             val type = object : TypeToken<BackupData>() {}.type
             val backupData: BackupData = gson.fromJson(jsonData, type)
 
+            // Clear existing data
+            repository.deleteAllTransactions()
+            repository.deleteAllCategories()
+            repository.deleteAllBudgets()
+            repository.deleteAllUsers()
+
             // Restore data
-            preferencesManager.saveTransactions(backupData.transactions)
-            preferencesManager.saveCategories(backupData.categories)
+            backupData.transactions.forEach { repository.insertTransaction(it) }
+            backupData.categories.forEach { repository.insertCategory(it) }
+            backupData.budgets.forEach { repository.insertBudget(it) }
+            backupData.users.forEach { repository.insertUser(it) }
+
+            // Restore preferences
             preferencesManager.setCurrency(backupData.currency)
-            
-            // Restore budgets
-            backupData.budgets.forEach { (key, budget) ->
-                val budgetJson = gson.toJson(budget)
-                preferencesManager.getSharedPreferences().edit().putString(key, budgetJson).apply()
-            }
-            
-            // Restore user data
-            userPreferences.saveUsers(backupData.users)
             if (backupData.currentUser.isNotEmpty()) {
                 userPreferences.saveLoginState(true, backupData.currentUser)
             }
 
-            return true
+            // Verify some data was actually restored
+            val restoredTransactions = repository.allTransactions.first().size
+            val restoredCategories = repository.allCategories.first().size
+
+            Log.d("BackupManager", "Restored $restoredTransactions transactions and $restoredCategories categories")
+
+            // Consider it successful if we restored at least some data
+            restoredTransactions > 0 || restoredCategories > 0
         } catch (e: Exception) {
-            e.printStackTrace()
-            return false
+            Log.e("BackupManager", "Restore failed", e)
+            false
         }
     }
-
-    // Get list of available backup files
     fun getBackupFiles(): List<String> {
-        val backupDir = File(context.getExternalFilesDir(null), "backups")
-        if (!backupDir.exists()) {
-            return emptyList()
+        return try {
+            val backupDir = File(context.getExternalFilesDir(null), "backups")
+            if (!backupDir.exists()) {
+                Log.d("BackupManager", "Backup directory doesn't exist yet")
+                return emptyList()
+            }
+
+            val files = backupDir.listFiles()
+            if (files == null) {
+                Log.e("BackupManager", "Failed to list files in backup directory")
+                return emptyList()
+            }
+
+            val backupFiles = files
+                .filter { it.name.startsWith("finance_tracker_backup_") && it.name.endsWith(".json") }
+                .map { it.name }
+                .sortedByDescending { it }
+
+            Log.d("BackupManager", "Found ${backupFiles.size} backup files")
+            backupFiles
+        } catch (e: Exception) {
+            Log.e("BackupManager", "Error listing backup files", e)
+            emptyList()
         }
-        
-        return backupDir.listFiles()
-            ?.filter { it.name.startsWith("finance_tracker_backup_") && it.name.endsWith(".json") }
-            ?.map { it.name }
-            ?.sortedByDescending { it }
-            ?: emptyList()
     }
 
     fun getBackupFilePath(fileName: String): String {
-        return File(context.getExternalFilesDir(null), "backups/$fileName").absolutePath
+        val backupDir = File(context.getExternalFilesDir(null), "backups")
+        return File(backupDir, fileName).absolutePath
     }
 
     data class BackupData(
@@ -136,6 +165,6 @@ class BackupManager(private val context: Context) {
         val currency: String,
         val currentUser: String,
         val users: List<User>,
-        val budgets: Map<String, Budget>
+        val budgets: List<Budget>
     )
 }

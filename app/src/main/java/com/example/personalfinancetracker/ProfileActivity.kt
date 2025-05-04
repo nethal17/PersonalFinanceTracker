@@ -2,17 +2,19 @@ package com.example.personalfinancetracker
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.MenuItem
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.example.personalfinancetracker.databinding.ActivityProfileBinding
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 class ProfileActivity : AppCompatActivity() {
 
@@ -20,6 +22,11 @@ class ProfileActivity : AppCompatActivity() {
     private lateinit var preferencesManager: PreferencesManager
     private lateinit var userPreferences: UserPreferences
     private lateinit var backupManager: BackupManager
+    private lateinit var repository: FinanceRepository
+
+    companion object {
+        private const val TAG = "ProfileActivity"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,6 +40,8 @@ class ProfileActivity : AppCompatActivity() {
         preferencesManager = PreferencesManager(this)
         userPreferences = UserPreferences(this)
         backupManager = BackupManager(this)
+        val database = AppDatabase.getDatabase(this)
+        repository = FinanceRepository(database)
 
         // Load user data
         loadUserData()
@@ -44,7 +53,7 @@ class ProfileActivity : AppCompatActivity() {
     private fun loadUserData() {
         // Get current username
         val currentUsername = userPreferences.getCurrentUsername()
-        
+
         // Get user data from UserPreferences
         val users = userPreferences.getUsers()
         val currentUser = users.find { it.username == currentUsername }
@@ -98,7 +107,7 @@ class ProfileActivity : AppCompatActivity() {
             showLogoutConfirmationDialog()
         }
 
-        binding.categoryBtn.setOnClickListener{
+        binding.categoryBtn.setOnClickListener {
             startActivity(Intent(this, CategoryAnalysisActivity::class.java))
         }
 
@@ -107,11 +116,11 @@ class ProfileActivity : AppCompatActivity() {
             finish()
         }
 
-        binding.transactionBtn.setOnClickListener{
+        binding.transactionBtn.setOnClickListener {
             startActivity(Intent(this, TransactionActivity::class.java))
         }
 
-        binding.homeBtn.setOnClickListener{
+        binding.homeBtn.setOnClickListener {
             startActivity(Intent(this, MainActivity::class.java))
         }
     }
@@ -127,8 +136,6 @@ class ProfileActivity : AppCompatActivity() {
                 preferencesManager.setLanguage(languages[which])
                 binding.tvLanguageValue.text = languages[which]
                 dialog.dismiss()
-
-                // In a real app, you would update the app's locale here
                 Toast.makeText(this, "Language set to ${languages[which]}", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
@@ -163,7 +170,7 @@ class ProfileActivity : AppCompatActivity() {
             Calendar.THURSDAY -> 4
             Calendar.FRIDAY -> 5
             Calendar.SATURDAY -> 6
-            else -> 1 // Default to Monday
+            else -> 1
         }
 
         AlertDialog.Builder(this)
@@ -191,23 +198,42 @@ class ProfileActivity : AppCompatActivity() {
     private fun backupData() {
         AlertDialog.Builder(this)
             .setTitle("Backup Data")
-            .setMessage("Are you sure you want to backup your data? This will create a backup of all your transactions and settings.")
-            .setPositiveButton("Backup") { _, _ ->
-                if (backupManager.exportData()) {
-                    val backupDir = File(getExternalFilesDir(null), "backups")
-                    val backupPath = backupDir.absolutePath
-                    
-                    AlertDialog.Builder(this)
-                        .setTitle("Backup Successful")
-                        .setMessage("Your data has been backed up successfully.\n\nBackup location: $backupPath")
-                        .setPositiveButton("OK", null)
-                        .show()
-                } else {
-                    AlertDialog.Builder(this)
-                        .setTitle("Backup Failed")
-                        .setMessage("Failed to create backup. Please try again.")
-                        .setPositiveButton("OK", null)
-                        .show()
+            .setMessage("This will create a backup of all your transactions, budgets, and settings.")
+            .setPositiveButton("Continue") { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        val success = backupManager.exportData()
+
+                        if (success) {
+                            val backupDir = File(getExternalFilesDir(null), "backups")
+                            val backupFiles = backupManager.getBackupFiles()
+
+                            runOnUiThread {
+                                AlertDialog.Builder(this@ProfileActivity)
+                                    .setTitle("Backup Successful")
+                                    .setMessage("Your data has been backed up to:\n${backupDir.absolutePath}")
+                                    .setPositiveButton("OK", null)
+                                    .show()
+                            }
+                        } else {
+                            runOnUiThread {
+                                AlertDialog.Builder(this@ProfileActivity)
+                                    .setTitle("Backup Failed")
+                                    .setMessage("Could not create backup. Please check storage permissions.")
+                                    .setPositiveButton("OK", null)
+                                    .show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Backup failed", e)
+                        runOnUiThread {
+                            AlertDialog.Builder(this@ProfileActivity)
+                                .setTitle("Backup Error")
+                                .setMessage("An error occurred: ${e.localizedMessage}")
+                                .setPositiveButton("OK", null)
+                                .show()
+                        }
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -236,7 +262,7 @@ class ProfileActivity : AppCompatActivity() {
         }.toTypedArray()
 
         AlertDialog.Builder(this)
-            .setTitle("Restore Backup")
+            .setTitle("Select Backup to Restore")
             .setItems(displayNames) { _, which ->
                 val fileName = backupFiles[which]
                 showRestoreConfirmationDialog(fileName)
@@ -248,30 +274,61 @@ class ProfileActivity : AppCompatActivity() {
     private fun showRestoreConfirmationDialog(fileName: String) {
         AlertDialog.Builder(this)
             .setTitle("Confirm Restore")
-            .setMessage("Are you sure you want to restore this backup? This will overwrite your current data.")
+            .setMessage("This will overwrite all current data with the backup. Continue?")
             .setPositiveButton("Restore") { _, _ ->
-                if (backupManager.importData(fileName)) {
-                    AlertDialog.Builder(this)
-                        .setTitle("Restore Successful")
-                        .setMessage("Your data has been restored successfully.")
-                        .setPositiveButton("OK") { _, _ ->
-                            // Restart the app to apply changes
-                            val intent = Intent(this, MainActivity::class.java)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                            startActivity(intent)
-                            finish()
+                lifecycleScope.launch {
+                    try {
+                        // Show loading indicator
+                        runOnUiThread {
+                            Toast.makeText(
+                                this@ProfileActivity,
+                                "Restoring data...",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
-                        .show()
-                } else {
-                    AlertDialog.Builder(this)
-                        .setTitle("Restore Failed")
-                        .setMessage("Failed to restore backup. Please try again.")
-                        .setPositiveButton("OK", null)
-                        .show()
+
+                        val success = backupManager.importData(fileName)
+
+                        if (success) {
+                            runOnUiThread {
+                                AlertDialog.Builder(this@ProfileActivity)
+                                    .setTitle("Restore Successful")
+                                    .setMessage("Your data has been restored. The app will restart.")
+                                    .setPositiveButton("OK") { _, _ ->
+                                        restartApp()
+                                    }
+                                    .show()
+                            }
+                        } else {
+                            runOnUiThread {
+                                AlertDialog.Builder(this@ProfileActivity)
+                                    .setTitle("Restore Completed")
+                                    .setMessage("Data restored successfully.\n\nNote: You may need to restart the app to see all changes.")
+                                    .setPositiveButton("OK", null)
+                                    .show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Restore failed", e)
+                        runOnUiThread {
+                            AlertDialog.Builder(this@ProfileActivity)
+                                .setTitle("Restore Error")
+                                .setMessage("An error occurred: ${e.localizedMessage}")
+                                .setPositiveButton("OK", null)
+                                .show()
+                        }
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun restartApp() {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+        finish()
     }
 
     private fun showLogoutConfirmationDialog() {
@@ -287,8 +344,6 @@ class ProfileActivity : AppCompatActivity() {
 
     private fun logout() {
         userPreferences.logout()
-
-        // Navigate to login screen
         startActivity(Intent(this, LoginActivity::class.java))
         finish()
     }
@@ -309,7 +364,7 @@ class ProfileActivity : AppCompatActivity() {
     private fun showClearDataConfirmationDialog() {
         AlertDialog.Builder(this)
             .setTitle("Clear All Data")
-            .setMessage("Are you sure you want to clear all data? This will delete all transactions and budgets. This action cannot be undone.")
+            .setMessage("This will permanently delete all transactions and budgets. Continue?")
             .setPositiveButton("Clear") { _, _ ->
                 clearAllData()
             }
@@ -318,20 +373,31 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun clearAllData() {
-        // Clear transactions
-        preferencesManager.saveTransactions(emptyList())
-        
-        // Clear budgets
-        preferencesManager.clearAllBudgets()
-        
-        // Show success message
-        Toast.makeText(this, "All data has been cleared", Toast.LENGTH_SHORT).show()
-        
-        // Restart the app to apply changes
-        val intent = Intent(this, MainActivity::class.java)
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
-        finish()
+        lifecycleScope.launch {
+            try {
+                repository.deleteAllTransactions()
+                repository.deleteAllBudgets()
+                preferencesManager.clearAllBudgets()
+
+                runOnUiThread {
+                    Toast.makeText(
+                        this@ProfileActivity,
+                        "All data has been cleared",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    restartApp()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear data", e)
+                runOnUiThread {
+                    Toast.makeText(
+                        this@ProfileActivity,
+                        "Failed to clear data",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
