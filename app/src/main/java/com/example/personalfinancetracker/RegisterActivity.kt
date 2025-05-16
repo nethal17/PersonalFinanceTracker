@@ -9,18 +9,24 @@ import android.util.Patterns
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.personalfinancetracker.databinding.ActivityRegisterBinding
+import kotlinx.coroutines.launch
 
 class RegisterActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRegisterBinding
     private lateinit var userPreferences: UserPreferences
+    private lateinit var repository: FinanceRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityRegisterBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Initialize Room database and repository
+        val database = AppDatabase.getDatabase(this)
+        repository = FinanceRepository(database)
         userPreferences = UserPreferences(this)
 
         // Check if user is already logged in
@@ -79,13 +85,6 @@ class RegisterActivity : AppCompatActivity() {
             return false
         }
 
-        // Check if username already exists
-        val existingUsers = userPreferences.getUsers()
-        if (existingUsers.any { it.username == username }) {
-            binding.tilUsername.error = "Username already exists"
-            return false
-        }
-
         // Validate password
         if (password.isEmpty()) {
             binding.tilPassword.error = "Password is required"
@@ -117,17 +116,32 @@ class RegisterActivity : AppCompatActivity() {
         // Create user object
         val user = User(email, username, password)
 
-        // Save user to SharedPreferences
-        userPreferences.saveUser(user)
+        // Save user to Room database using coroutine
+        lifecycleScope.launch {
+            try {
+                // Check if username already exists
+                val existingUser = repository.getUserByUsername(username)
+                if (existingUser != null) {
+                    binding.tilUsername.error = "Username already exists"
+                    return@launch
+                }
 
-        // Do NOT set login state here, user needs to log in
-        // userPreferences.saveLoginState(true, username)
-
-        Toast.makeText(this, "Registration successful! Please log in.", Toast.LENGTH_SHORT).show()
-
-        // Navigate to login activity
-        navigateToLogin()
-        finish()
+                // Insert new user
+                repository.insertUser(user)
+                
+                // Show success message
+                runOnUiThread {
+                    Toast.makeText(this@RegisterActivity, "Registration successful! Please log in.", Toast.LENGTH_SHORT).show()
+                    // Navigate to login activity
+                    navigateToLogin()
+                    finish()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@RegisterActivity, "Registration failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun navigateToLogin() {

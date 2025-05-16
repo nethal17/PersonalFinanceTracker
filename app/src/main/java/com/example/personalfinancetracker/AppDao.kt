@@ -43,6 +43,9 @@ interface CategoryDao {
     
     @Query("DELETE FROM categories")
     suspend fun deleteAllCategories()
+
+    @Query("DELETE FROM categories WHERE rowid NOT IN (SELECT MIN(rowid) FROM categories GROUP BY name)")
+    suspend fun removeDuplicateCategories()
 }
 
 @Dao

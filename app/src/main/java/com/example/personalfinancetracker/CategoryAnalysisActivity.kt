@@ -39,6 +39,11 @@ class CategoryAnalysisActivity : AppCompatActivity() {
         val database = AppDatabase.getDatabase(this)
         repository = FinanceRepository(database)
 
+        // Remove duplicate categories
+        lifecycleScope.launch {
+            database.categoryDao().removeDuplicateCategories()
+        }
+
         // Set up back button
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Category Analysis"
@@ -97,10 +102,10 @@ class CategoryAnalysisActivity : AppCompatActivity() {
 
     private fun updateCategoryAnalysis() {
         lifecycleScope.launch {
-            // Get current month and year
-            val calendar = Calendar.getInstance()
-            val currentMonth = calendar.get(Calendar.MONTH)
-            val currentYear = calendar.get(Calendar.YEAR)
+        // Get current month and year
+        val calendar = Calendar.getInstance()
+        val currentMonth = calendar.get(Calendar.MONTH)
+        val currentYear = calendar.get(Calendar.YEAR)
 
             // Get start and end of current month
             val startOfMonth = Calendar.getInstance().apply {
@@ -133,51 +138,51 @@ class CategoryAnalysisActivity : AppCompatActivity() {
                     // Filter expenses only
                     val currentMonthExpenses = transactions.filter { it.isExpense }
 
-                    // Group expenses by category
-                    val expensesByCategory = currentMonthExpenses.groupBy { it.category }
+        // Group expenses by category
+        val expensesByCategory = currentMonthExpenses.groupBy { it.category }
 
-                    // Calculate total expenses
-                    val totalExpenses = currentMonthExpenses.sumOf { it.amount }
+        // Calculate total expenses
+        val totalExpenses = currentMonthExpenses.sumOf { it.amount }
 
-                    // Update total expenses text
-                    val currency = preferencesManager.getCurrency()
-                    binding.tvTotalExpenses.text = "Total Expenses: $currency ${totalExpenses.format(2)}"
+        // Update total expenses text
+        val currency = preferencesManager.getCurrency()
+        binding.tvTotalExpenses.text = "Total Expenses: $currency ${totalExpenses.format(2)}"
 
-                    // Create category summary items
-                    val categorySummaries = mutableListOf<CategorySummary>()
-                    val pieEntries = ArrayList<PieEntry>()
-                    val categoryColors = ArrayList<Int>()
+        // Create category summary items
+        val categorySummaries = mutableListOf<CategorySummary>()
+        val pieEntries = ArrayList<PieEntry>()
+        val categoryColors = ArrayList<Int>()
 
-                    for (category in categories) {
-                        val expenses = expensesByCategory[category.name]?.sumOf { it.amount } ?: 0.0
-                        val percentage = if (totalExpenses > 0) (expenses / totalExpenses * 100) else 0.0
+        for (category in categories) {
+            val expenses = expensesByCategory[category.name]?.sumOf { it.amount } ?: 0.0
+            val percentage = if (totalExpenses > 0) (expenses / totalExpenses * 100) else 0.0
 
-                        // Only add categories with expenses to the pie chart
-                        if (expenses > 0) {
-                            categorySummaries.add(
-                                CategorySummary(
-                                    category = category,
-                                    amount = expenses,
-                                    percentage = percentage
-                                )
-                            )
+            // Only add categories with expenses to the pie chart
+            if (expenses > 0) {
+                categorySummaries.add(
+                    CategorySummary(
+                        category = category,
+                        amount = expenses,
+                        percentage = percentage
+                    )
+                )
 
-                            // Add entry to pie chart data
-                            pieEntries.add(PieEntry(expenses.toFloat(), category.name))
-                            categoryColors.add(category.color)
-                        }
-                    }
+                // Add entry to pie chart data
+                pieEntries.add(PieEntry(expenses.toFloat(), category.name))
+                categoryColors.add(category.color)
+            }
+        }
 
-                    // Sort by amount (highest first)
-                    categorySummaries.sortByDescending { it.amount }
+        // Sort by amount (highest first)
+        categorySummaries.sortByDescending { it.amount }
 
-                    // Update RecyclerView
-                    val adapter = CategorySummaryAdapter(categorySummaries)
-                    binding.rvCategories.adapter = adapter
+        // Update RecyclerView
+        val adapter = CategorySummaryAdapter(categorySummaries)
+        binding.rvCategories.adapter = adapter
                     binding.rvCategories.layoutManager = LinearLayoutManager(this@CategoryAnalysisActivity)
 
-                    // Update pie chart
-                    updatePieChartData(pieEntries, categoryColors, totalExpenses)
+        // Update pie chart
+        updatePieChartData(pieEntries, categoryColors, totalExpenses)
                 }
             }
         }

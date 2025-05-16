@@ -122,7 +122,7 @@ class PreferencesManager(context: Context) {
         sharedPreferences.edit().putBoolean("is_logged_in", false).apply()
     } */
 
-    private fun getDefaultCategories(): List<Category> {
+    fun getDefaultCategories(): List<Category> {
         return listOf(
             Category(name = "Food", color = Color.rgb(255, 102, 102)), // Red
             Category(name = "Transport", color = Color.rgb(102, 178, 255)), // Blue

@@ -11,10 +11,14 @@ import androidx.appcompat.app.AppCompatActivity
 class SplashActivity : AppCompatActivity() {
 
     private val SPLASH_DELAY: Long = 2000 // 2 seconds delay
+    private lateinit var repository: FinanceRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_splash)
+
+        val database = AppDatabase.getDatabase(this)
+        repository = FinanceRepository(database)
 
         // Use a Handler to delay the transition to RegisterActivity
         Handler(Looper.getMainLooper()).postDelayed({

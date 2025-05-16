@@ -51,24 +51,39 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun loadUserData() {
-        // Get current username
+        // Get current username from UserPreferences (session management)
         val currentUsername = userPreferences.getCurrentUsername()
 
-        // Get user data from UserPreferences
-        val users = userPreferences.getUsers()
-        val currentUser = users.find { it.username == currentUsername }
+        // Load user data from Room database using coroutine
+        lifecycleScope.launch {
+            try {
+                // Get user data from Room database
+                val currentUser = repository.getUserByUsername(currentUsername)
 
-        // Load user info
-        val username = currentUser?.username ?: "User"
-        val email = currentUser?.email ?: "user@example.com"
+                // Update UI with user info
+                runOnUiThread {
+                    val username = currentUser?.username ?: "nethal20"
+                    val email = currentUser?.email ?: "nethal20@gmail.com"
 
-        binding.tvUsername.text = username
-        binding.tvEmail.text = email
+                    binding.tvUsername.text = username
+                    binding.tvEmail.text = email
 
-        // Load settings
-        binding.tvLanguageValue.text = preferencesManager.getLanguage() ?: "English"
-        binding.tvCurrencyValue.text = preferencesManager.getCurrency()
-        binding.tvFirstDayValue.text = getFirstDayName(preferencesManager.getFirstDayOfWeek() ?: Calendar.MONDAY)
+                    // Load settings
+                    binding.tvLanguageValue.text = preferencesManager.getLanguage() ?: "English"
+                    binding.tvCurrencyValue.text = preferencesManager.getCurrency()
+                    binding.tvFirstDayValue.text = getFirstDayName(preferencesManager.getFirstDayOfWeek() ?: Calendar.MONDAY)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading user data", e)
+                runOnUiThread {
+                    Toast.makeText(
+                        this@ProfileActivity,
+                        "Error loading user data: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun setupClickListeners() {
